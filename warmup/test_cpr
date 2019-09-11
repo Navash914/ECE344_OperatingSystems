@@ -1,0 +1,41 @@
+#!/bin/sh
+
+SRC=/cad2/ece344f/tester
+DST=./tester
+
+# test for mkdir error
+chmod -f 755 ./tester/scripts/readonlydir
+rm -rf $DST
+mkdir ./tester
+ERR=$(./cpr $SRC $DST 2>&1)
+if [ "$ERR" = "mkdir: ./tester: File exists" ]; then
+    # mkdir fails as expected
+    echo "OK" 1>&2
+else
+    exit 1
+fi
+
+# main test
+rm -rf $DST
+./cpr $SRC $DST > /dev/null 2>&1
+
+diff -rq $SRC $DST
+if [ $? -eq 0 ]; then
+    # all files and directories are the same
+    echo "OK" 1>&2
+else
+    exit 1
+fi
+
+(cd $SRC; find . -exec stat --format='%n %A %s' {} \; | sort) > src.out
+(cd $DST; find . -exec stat --format='%n %A %s' {} \; | sort) > dst.out
+
+diff src.out dst.out
+if [ $? -eq 0 ]; then
+    # no permissions differences
+    echo "OK" 1>&2    
+else
+    exit 1
+fi
+
+exit 0
