@@ -8,3 +8,9 @@ test_sorted_points
 words
 test_wc
 cpr
+dst.out
+src.out
+tester.log
+tester.out
+tester/
+wc-small.out
