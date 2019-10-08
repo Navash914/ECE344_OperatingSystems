@@ -130,7 +130,7 @@ struct thread_list* pop_queue(struct thread_queue *q) {
 	struct thread_list* old_head = q->head;
 	q->head = q->head->next;
 	old_head->next = NULL;
-	q->size--;
+	q->size--;	// Update queue size
 	return old_head;
 }
 
@@ -138,19 +138,22 @@ struct thread_list* pop_queue(struct thread_queue *q) {
 // This does not free memory for the node
 void remove_from_queue(struct thread_queue *q, struct thread_list *target, struct thread_list *prev) {
 	if (q->size == 1) {
+		// This is the only node in the queue
 		q->head = NULL;
 		q->tail = NULL;
 	} else if (target == q->head) {
+		// Removing head
 		q->head = q->head->next;
 		target->next = NULL;
 	} else {
 		prev->next = target->next;
 		target->next = NULL;
 		if (target == q->tail) {
+			// Update new tail
 			q->tail = prev;
 		}
 	}
-	q->size--;
+	q->size--;	// Update queue size
 }
 
 // Frees memory allocated for node
