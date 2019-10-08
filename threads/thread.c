@@ -27,14 +27,14 @@ struct wait_queue {
 	/* ... Fill this in Lab 3 ... */
 };
 
-// This is the ready queue structure
-struct ready_queue {
-	int size;	// Size of the ready queue
-	struct thread_list *head;	// Start of the ready queue
+// This is the thread queue structure
+struct thread_queue {
+	int size;	// Size of the thread queue
+	struct thread_list *head;	// Start of the queue
 								// The head of the ready queue 
 								// is also the currently running thread
-	struct thread_list *tail;	// End of the ready queue
-} rq;
+	struct thread_list *tail;	// End of the queue
+} rq, eq;	// rq is the ready queue. eq is the exit queue.
 
 /* This is the thread control block */
 struct thread {
@@ -43,6 +43,107 @@ struct thread {
 	ucontext_t context;			// Thread context
 	void *stack;				// Pointer to memory allocated for thread stack
 };
+
+//	=================	Helper Functions	=================	//
+
+struct thread_list* find_in_queue(struct thread_queue *q, int tid) {
+	struct thread_list* current = q->head;
+	while (current != NULL) {
+		if (current->thread->id == tid)
+			break;
+		current = current->next;
+	}
+	return current;
+}
+
+struct thread_list* find_in_queue_with_prev(struct thread_queue *q, int tid, struct thread_list **prev) {
+	if (q->head->thread->id == tid) {
+		*prev = NULL;
+		return q->head;
+	}
+
+	struct thread_list* current = q->head;
+
+	while (current->next != NULL) {
+		if (current->next->thread->id == tid)
+			break;
+		current = current->next;
+	}
+	*prev = current;
+	return current->next;
+}
+
+bool append_to_queue(struct thread_queue *q, struct thread *th) {
+	struct thread_list *new_node = (struct thread_list *) malloc(sizeof(struct thread_list));
+	if (new_node == NULL)
+		return false;
+	new_node->thread = th;
+	new_node->next = NULL;
+	if (q->head == NULL) {
+		// Queue is currently empty
+		q->head = new_node;
+		q->tail = new_node;
+	} else {
+		q->tail->next = new_node;	// Append to end of queue
+		q->tail = q->tail->next;	// Move tail to new end of queue
+	}
+	q->size++;	// Update queue size
+	return true;
+}
+
+void move_head_to_end(struct thread_queue *q) {
+	if (q->size <= 1)
+		return;
+	struct thread_list *old_head = q->head;
+	q->head = q->head->next;
+	q->tail->next = old_head;
+	q->tail = old_head;
+	old_head->next = NULL;
+}
+
+void move_to_head(struct thread_queue *q, struct thread_list *target, struct thread_list *prev) {
+	if (q->size <= 1)
+		return;
+	struct thread_list *old_head = q->head;
+	q->head = target;
+	prev->next = target->next;
+	target->next = old_head;
+	if (q->tail == target)
+		q->tail = prev;
+}
+
+void remove_from_queue(struct thread_queue *q, struct thread_list *target, struct thread_list *prev) {
+	if (q->size == 1) {
+		q->head = NULL;
+		q->tail = NULL;
+	} else if (target == q->head) {
+		q->head = q->head->next;
+		target->next = NULL;
+	} else {
+		prev->next = target->next;
+		target->next = NULL;
+		if (target == q->tail) {
+			q->tail = prev;
+		}
+	}
+	q->size--;
+}
+
+void free_node(struct thread_list *node) {
+	free(node->thread->stack);
+	free(node->thread);
+	free(node);
+}
+
+void clear_queue(struct thread_queue *q) {
+	while (q->head != NULL) {
+		struct thread_list *next = q->head->next;
+		free_node(q->head);
+		q->head = next;
+	}
+	q->tail = NULL;
+	q->size = 0;
+}
 
 // Thread stub function that all threads enter when they are first run
 void
