@@ -46,6 +46,7 @@ struct thread {
 
 //	=================	Helper Functions	=================	//
 
+// Find thread with given tid in queue
 struct thread_list* find_in_queue(struct thread_queue *q, int tid) {
 	struct thread_list* current = q->head;
 	while (current != NULL) {
@@ -56,6 +57,8 @@ struct thread_list* find_in_queue(struct thread_queue *q, int tid) {
 	return current;
 }
 
+// Find thread with given tid in queue
+// Also return the previous node in prev
 struct thread_list* find_in_queue_with_prev(struct thread_queue *q, int tid, struct thread_list **prev) {
 	if (q->head->thread->id == tid) {
 		*prev = NULL;
@@ -73,24 +76,31 @@ struct thread_list* find_in_queue_with_prev(struct thread_queue *q, int tid, str
 	return current->next;
 }
 
+// Appends given node to queue
+void append_node_to_queue(struct thread_queue *q, struct thread_list *node) {
+	if (q->head == NULL) {
+		// Queue is currently empty
+		q->head = node;
+		q->tail = node;
+	} else {
+		q->tail->next = node;	// Append to end of queue
+		q->tail = q->tail->next;	// Move tail to new end of queue
+	}
+	q->size++;	// Update queue size
+}
+
+// Creates new node for thread and appends to queue
 bool append_to_queue(struct thread_queue *q, struct thread *th) {
 	struct thread_list *new_node = (struct thread_list *) malloc(sizeof(struct thread_list));
 	if (new_node == NULL)
 		return false;
 	new_node->thread = th;
 	new_node->next = NULL;
-	if (q->head == NULL) {
-		// Queue is currently empty
-		q->head = new_node;
-		q->tail = new_node;
-	} else {
-		q->tail->next = new_node;	// Append to end of queue
-		q->tail = q->tail->next;	// Move tail to new end of queue
-	}
-	q->size++;	// Update queue size
+	append_node_to_queue(q, new_node);
 	return true;
 }
 
+// Moves the head of the queue to the end
 void move_head_to_end(struct thread_queue *q) {
 	if (q->size <= 1)
 		return;
@@ -101,8 +111,11 @@ void move_head_to_end(struct thread_queue *q) {
 	old_head->next = NULL;
 }
 
+// Moves the target node to the head of the queue
 void move_to_head(struct thread_queue *q, struct thread_list *target, struct thread_list *prev) {
 	if (q->size <= 1)
+		return;
+	if (target == q->head)
 		return;
 	struct thread_list *old_head = q->head;
 	q->head = target;
@@ -112,6 +125,17 @@ void move_to_head(struct thread_queue *q, struct thread_list *target, struct thr
 		q->tail = prev;
 }
 
+// Removes and returns and the head of the queue
+struct thread_list* pop_queue(struct thread_queue *q) {
+	struct thread_list* old_head = q->head;
+	q->head = q->head->next;
+	old_head->next = NULL;
+	q->size--;
+	return old_head;
+}
+
+// Removes target node from queue
+// This does not free memory for the node
 void remove_from_queue(struct thread_queue *q, struct thread_list *target, struct thread_list *prev) {
 	if (q->size == 1) {
 		q->head = NULL;
@@ -129,12 +153,14 @@ void remove_from_queue(struct thread_queue *q, struct thread_list *target, struc
 	q->size--;
 }
 
+// Frees memory allocated for node
 void free_node(struct thread_list *node) {
 	free(node->thread->stack);
 	free(node->thread);
 	free(node);
 }
 
+// Frees all nodes in the given queue
 void clear_queue(struct thread_queue *q) {
 	while (q->head != NULL) {
 		struct thread_list *next = q->head->next;
@@ -145,11 +171,16 @@ void clear_queue(struct thread_queue *q) {
 	q->size = 0;
 }
 
+//	=================	End of Helper Functions		=================	//
+
 // Thread stub function that all threads enter when they are first run
 void
 thread_stub(void (*thread_main)(void *), void *arg)
 {
+	if (rq.head->thread->status == THREAD_EXITED)
+		thread_exit();	// Thread was killed before it was run
 	rq.head->thread->status = THREAD_RUNNING;	// Set thread to running
+	clear_queue(&eq);	// Clear exit queue
 	thread_main(arg); // call thread_main() function with arg
 	thread_exit();		// Exit thread when execution is done
 }
@@ -163,12 +194,12 @@ thread_init(void)
 	th->id = 0;
 	th->status = THREAD_RUNNING;
 
+	// Initialize the queue sizes
+	rq.size = 0;
+	eq.size = 0;
+
 	// Add thread to the ready queue
-	rq.head = (struct thread_list *) malloc(sizeof(struct thread_list));
-	rq.head->thread = th;
-	rq.head->next = NULL;
-	rq.tail = rq.head;
-	rq.size = 1;
+	append_to_queue(&rq, th);
 	Tid_taken[0] = true;
 }
 
@@ -221,11 +252,14 @@ thread_create(void (*fn) (void *), void *parg)
 	th->context.uc_mcontext.gregs[16] = (unsigned long) thread_stub;
 
 	// Add newly created thread to the end of the ready queue
-	rq.tail->next = (struct thread_list *) malloc(sizeof(struct thread_list));
-	rq.tail = rq.tail->next;
-	rq.tail->thread = th;
-	rq.tail->next = NULL;
-	rq.size++;
+	bool success = append_to_queue(&rq, th);
+	if (!success) {
+		// No memory for thread node
+		// Free previously allocated memory
+		free(th->stack);
+		free(th);
+		return THREAD_NOMEMORY;
+	}
 
 	// Thread id of newly created thread is now taken
 	Tid_taken[id] = true;
@@ -247,12 +281,8 @@ thread_yield(Tid want_tid)
 		want_thread = rq.head->next;
 		want_tid = want_thread->thread->id;
 
-		// Move current thread to end of ready queue and 
-		// assign the next thread in the queue as the new head
-		rq.head = want_thread;
-		rq.tail->next = current_thread;
-		rq.tail = current_thread;
-		current_thread->next = NULL;
+		// Move current thread to end of ready queue
+		move_head_to_end(&rq);
 	} else if (want_tid == THREAD_SELF || want_tid == rq.head->thread->id) {
 		// Yield to the currently running thread
 		// Should be a no-op but yield anyways for debugging purposes
@@ -261,26 +291,15 @@ thread_yield(Tid want_tid)
 	} else {
 		// Yield the thread with id want_tid
 		// Find the thread in the ready queue
-		struct thread_list *current = rq.head;
-		while (current->next != NULL) {
-			if (want_tid == current->next->thread->id)
-				break;	// Found the thread
-			current = current->next;
-		}
-		want_thread = current->next;
+		struct thread_list *prev;
+		want_thread = find_in_queue_with_prev(&rq, want_tid, &prev);
 		if (want_thread == NULL)
 			return THREAD_INVALID;	// Thread with id want_tid does not exist in the ready queue
 
 		// Move current thread to end of ready queue and 
 		// assign the wanted thread in the queue as the new head
-		rq.head = want_thread;
-		rq.tail->next = current_thread;
-		rq.tail = current_thread;
-		current->next = want_thread->next;
-		want_thread->next = current_thread->next;
-		if (want_thread->next == NULL)
-			want_thread->next = current_thread;
-		current_thread->next = NULL;
+		move_head_to_end(&rq);
+		move_to_head(&rq, want_thread, prev);
 	}
 
 	volatile bool setcontext_called = false;		// Flag to check if returning from a different thread
@@ -293,6 +312,7 @@ thread_yield(Tid want_tid)
 			thread_exit();	// This thread was marked to exit
 		else {
 			rq.head->thread->status = THREAD_RUNNING;	// Set current thread status to running
+			clear_queue(&eq);	// Clear exit queue
 			return want_tid;
 		}
 	}
@@ -308,21 +328,29 @@ thread_exit()
 {
 	Tid_taken[rq.head->thread->id] = false;	// This Tid can be reused
 
-	// Store pointers to memory about to be deallocated
-	struct thread_list *current_thread_list = rq.head;
-	struct thread *current_thread = current_thread_list->thread;
-	void *stack_ptr = current_thread->stack;
+	// Pop head of ready queue
+	struct thread_list* exited_thread = pop_queue(&rq);
 
-	// Move head of ready queue to next available thread
-	rq.head = rq.head->next;
-	rq.size--;	// One element removed from queue
+	if (rq.head == NULL) {
+		// This is the last running thread.
+		// Clear exit queue, deallocate current thread
+		// and exit from program
+		clear_queue(&eq);
 
-	// Deallocate memory for this thread
-	free(current_thread_list);
-	free(current_thread);
-	free(stack_ptr);		// !! STACK DEALLOCATED. CAN NO LONGER USE STACK MEMORY !!
-	if (rq.head == NULL)
-		exit(0);	// This was the last running thread so exit out of the program
+		struct thread_list *current_thread_list = exited_thread;
+		struct thread *current_thread = current_thread_list->thread;
+		void *stack_ptr = current_thread->stack;
+
+		// Deallocate memory for this thread
+		free(current_thread_list);
+		free(current_thread);
+		free(stack_ptr);		// !! STACK DEALLOCATED. CAN NO LONGER USE STACK MEMORY !!
+		exit(0);
+	}
+
+	// Append exited thread to exit queue
+	append_node_to_queue(&eq, exited_thread);
+
 	setcontext(&rq.head->thread->context);	// Switch to next available thread
 }
 
@@ -334,25 +362,9 @@ thread_kill(Tid tid)
 		return THREAD_INVALID;	// Cannot kill currently running thread
 
 	// Find the requested thread
-	struct thread_list *current = rq.head;
-	while (current->next != NULL) {
-		if (tid == current->next->thread->id)
-			break;
-		current = current->next;
-	}
-
-	struct thread_list *thread2kill = current->next;
+	struct thread_list *thread2kill = find_in_queue(&rq, tid);
 	if (thread2kill == NULL)
 		return THREAD_INVALID;	// Requested thread does not exist on the ready queue
-
-	// Move killed thread to end of queue
-	// This is commented out because it is not required to move
-	// the killed thread to the end of queue
-	/*if (thread2kill != rq.tail) {
-		current->next = thread2kill->next;
-		rq.tail->next = thread2kill;
-		thread2kill->next = NULL;
-	}*/
 	
 	Tid killed_id = thread2kill->thread->id;
 
