@@ -22,19 +22,16 @@ typedef enum {
 	THREAD_EXITED
 } THREAD_STATUS;
 
-/* This is the wait queue structure */
-struct wait_queue {
-	/* ... Fill this in Lab 3 ... */
-};
-
 // This is the thread queue structure
-struct thread_queue {
+struct wait_queue {
 	int size;	// Size of the thread queue
 	struct thread_list *head;	// Start of the queue
 								// The head of the ready queue 
 								// is also the currently running thread
 	struct thread_list *tail;	// End of the queue
 } rq, eq;	// rq is the ready queue. eq is the exit queue.
+
+typedef struct wait_queue thread_queue;
 
 /* This is the thread control block */
 struct thread {
@@ -47,7 +44,7 @@ struct thread {
 //	=================	Helper Functions	=================	//
 
 // Find thread with given tid in queue
-struct thread_list* find_in_queue(struct thread_queue *q, int tid) {
+struct thread_list* find_in_queue(thread_queue *q, int tid) {
 	struct thread_list* current = q->head;
 	while (current != NULL) {
 		if (current->thread->id == tid)
@@ -59,7 +56,7 @@ struct thread_list* find_in_queue(struct thread_queue *q, int tid) {
 
 // Find thread with given tid in queue
 // Also return the previous node in prev
-struct thread_list* find_in_queue_with_prev(struct thread_queue *q, int tid, struct thread_list **prev) {
+struct thread_list* find_in_queue_with_prev(thread_queue *q, int tid, struct thread_list **prev) {
 	if (q->head->thread->id == tid) {
 		*prev = NULL;
 		return q->head;
@@ -77,7 +74,7 @@ struct thread_list* find_in_queue_with_prev(struct thread_queue *q, int tid, str
 }
 
 // Appends given node to queue
-void append_node_to_queue(struct thread_queue *q, struct thread_list *node) {
+void append_node_to_queue(thread_queue *q, struct thread_list *node) {
 	if (q->head == NULL) {
 		// Queue is currently empty
 		q->head = node;
@@ -90,7 +87,7 @@ void append_node_to_queue(struct thread_queue *q, struct thread_list *node) {
 }
 
 // Creates new node for thread and appends to queue
-bool append_to_queue(struct thread_queue *q, struct thread *th) {
+bool append_to_queue(thread_queue *q, struct thread *th) {
 	struct thread_list *new_node = (struct thread_list *) malloc(sizeof(struct thread_list));
 	if (new_node == NULL)
 		return false;
@@ -101,7 +98,7 @@ bool append_to_queue(struct thread_queue *q, struct thread *th) {
 }
 
 // Moves the head of the queue to the end
-void move_head_to_end(struct thread_queue *q) {
+void move_head_to_end(thread_queue *q) {
 	if (q->size <= 1)
 		return;
 	struct thread_list *old_head = q->head;
@@ -112,7 +109,7 @@ void move_head_to_end(struct thread_queue *q) {
 }
 
 // Moves the target node to the head of the queue
-void move_to_head(struct thread_queue *q, struct thread_list *target, struct thread_list *prev) {
+void move_to_head(thread_queue *q, struct thread_list *target, struct thread_list *prev) {
 	if (q->size <= 1)
 		return;
 	if (target == q->head)
@@ -126,7 +123,7 @@ void move_to_head(struct thread_queue *q, struct thread_list *target, struct thr
 }
 
 // Removes and returns and the head of the queue
-struct thread_list* pop_queue(struct thread_queue *q) {
+struct thread_list* pop_queue(thread_queue *q) {
 	struct thread_list* old_head = q->head;
 	q->head = q->head->next;
 	old_head->next = NULL;
@@ -136,7 +133,7 @@ struct thread_list* pop_queue(struct thread_queue *q) {
 
 // Removes target node from queue
 // This does not free memory for the node
-void remove_from_queue(struct thread_queue *q, struct thread_list *target, struct thread_list *prev) {
+void remove_from_queue(thread_queue *q, struct thread_list *target, struct thread_list *prev) {
 	if (q->size == 1) {
 		// This is the only node in the queue
 		q->head = NULL;
@@ -164,7 +161,7 @@ void free_node(struct thread_list *node) {
 }
 
 // Frees all nodes in the given queue
-void clear_queue(struct thread_queue *q) {
+void clear_queue(thread_queue *q) {
 	while (q->head != NULL) {
 		struct thread_list *next = q->head->next;
 		free_node(q->head);
@@ -320,7 +317,7 @@ thread_yield(Tid want_tid)
 	}
 
 	volatile bool setcontext_called = false;		// Flag to check if returning from a different thread
-	current_thread->thread->status = THREAD_READY;	// Set current thread (which is about to sleep) to ready state
+	current_thread->thread->status = THREAD_READY;	// Set current thread (which is about to yield) to ready state
 	getcontext(&current_thread->thread->context);	// Save context for current thread
 
 	if (setcontext_called) {
@@ -409,7 +406,9 @@ wait_queue_create()
 	wq = malloc(sizeof(struct wait_queue));
 	assert(wq);
 
-	TBD();
+	wq->size = 0;
+	wq->head = NULL;
+	wq->tail = NULL;
 
 	return wq;
 }
@@ -417,15 +416,51 @@ wait_queue_create()
 void
 wait_queue_destroy(struct wait_queue *wq)
 {
-	TBD();
+	clear_queue(wq);
 	free(wq);
 }
 
 Tid
 thread_sleep(struct wait_queue *queue)
 {
-	TBD();
-	return THREAD_FAILED;
+	int enabled = interrupts_off();
+	if (queue == NULL) {
+		// Invalid Queue
+		interrupts_set(enabled);
+		return THREAD_INVALID;
+	}
+	if (rq.size == 1) {
+		// Currently running thread is the only availabled thread
+		interrupts_set(enabled);
+		return THREAD_NONE;
+	}
+
+	struct thread_list *current_thread = pop_queue(&rq);
+	append_node_to_queue(queue, current_thread);
+
+	struct thread_list *new_thread = rq.head;
+	int ret_id = new_thread->thread->id;
+
+	volatile bool setcontext_called = false;			// Flag to check if returning from a different thread
+	current_thread->thread->status = THREAD_BLOCKED;	// Set current thread (which is about to sleep) to blocked state
+	getcontext(&current_thread->thread->context);		// Save context for current thread
+
+	if (setcontext_called) {
+		// Returning to this thread from a different thread
+		if (rq.head->thread->status == THREAD_EXITED)
+			thread_exit();	// This thread was marked to exit
+		else {
+			rq.head->thread->status = THREAD_RUNNING;	// Set current thread status to running
+			clear_queue(&eq);	// Clear exit queue
+			interrupts_set(enabled);
+			return ret_id;
+		}
+	}
+	setcontext_called = true;
+	setcontext(&new_thread->thread->context);	// Switch to context of wanted thread
+	
+	interrupts_set(enabled);
+	return ret_id;
 }
 
 /* when the 'all' parameter is 1, wakeup all threads waiting in the queue.
@@ -433,8 +468,23 @@ thread_sleep(struct wait_queue *queue)
 int
 thread_wakeup(struct wait_queue *queue, int all)
 {
-	TBD();
-	return 0;
+	int enabled = interrupts_off();
+	if (queue == NULL || queue->size == 0) {
+		// Invalid or empty queue
+		interrupts_set(enabled);
+		return 0;
+	}
+
+	int count = 0;
+	do {
+		struct thread_list *node = pop_queue(queue);
+		node->thread->status = THREAD_READY;
+		append_node_to_queue(&rq, node);
+		count++;
+	} while (all && queue->head != NULL);
+
+	interrupts_set(enabled);
+	return count;
 }
 
 /* suspend current thread until Thread tid exits */
