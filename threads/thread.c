@@ -33,6 +33,8 @@ struct wait_queue {
 
 typedef struct wait_queue thread_queue;
 
+struct wait_queue *thread_wait_queues[THREAD_MAX_THREADS] = { NULL };
+
 /* This is the thread control block */
 struct thread {
 	Tid id;						// Id of the thread
@@ -155,6 +157,8 @@ void remove_from_queue(thread_queue *q, struct thread_list *target, struct threa
 
 // Frees memory allocated for node
 void free_node(struct thread_list *node) {
+	if (node == NULL)
+		return;
 	free(node->thread->stack);
 	free(node->thread);
 	free(node);
@@ -162,6 +166,8 @@ void free_node(struct thread_list *node) {
 
 // Frees all nodes in the given queue
 void clear_queue(thread_queue *q) {
+	if (q == NULL)
+		return;
 	while (q->head != NULL) {
 		struct thread_list *next = q->head->next;
 		free_node(q->head);
@@ -343,16 +349,26 @@ void
 thread_exit()
 {
 	interrupts_off();
-	Tid_taken[rq.head->thread->id] = false;	// This Tid can be reused
+	Tid_taken[thread_id()] = false;	// This Tid can be reused
+
+	// Wakeup all threads waiting on this thread's exit
+	thread_wakeup(thread_wait_queues[thread_id()], 1);
+
+	// Delete the wait queue for this thread
+	wait_queue_destroy(thread_wait_queues[thread_id()]);
+	thread_wait_queues[thread_id()] = NULL;
 
 	// Pop head of ready queue
 	struct thread_list* exited_thread = pop_queue(&rq);
 
 	if (rq.head == NULL) {
 		// This is the last running thread.
-		// Clear exit queue, deallocate current thread
-		// and exit from program
+		// Clear exit queue, any remaining wait queues,
+		// deallocate current thread and exit from program
 		clear_queue(&eq);
+
+		for (int i=0; i<THREAD_MAX_THREADS; ++i)
+			wait_queue_destroy(thread_wait_queues[i]);
 
 		struct thread_list *current_thread_list = exited_thread;
 		struct thread *current_thread = current_thread_list->thread;
@@ -491,8 +507,24 @@ thread_wakeup(struct wait_queue *queue, int all)
 Tid
 thread_wait(Tid tid)
 {
-	TBD();
-	return 0;
+	int enabled = interrupts_off();
+	
+	if (tid < 0 || tid == thread_id() || !Tid_taken[tid]) {
+		// Invalid tid
+		interrupts_set(enabled);
+		return THREAD_INVALID;
+	}
+
+	int ret_id = thread_id();
+	struct wait_queue *wq = thread_wait_queues[tid];
+	if (wq == NULL) {
+		thread_wait_queues[tid] = wait_queue_create();
+		wq = thread_wait_queues[tid];
+	}
+
+	thread_sleep(wq);
+	interrupts_set(enabled);
+	return ret_id;
 }
 
 struct lock {
