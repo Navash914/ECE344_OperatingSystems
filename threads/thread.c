@@ -180,6 +180,7 @@ void clear_queue(struct thread_queue *q) {
 void
 thread_stub(void (*thread_main)(void *), void *arg)
 {
+	interrupts_on();
 	if (rq.head->thread->status == THREAD_EXITED)
 		thread_exit();	// Thread was killed before it was run
 	rq.head->thread->status = THREAD_RUNNING;	// Set thread to running
@@ -217,6 +218,7 @@ thread_id()
 Tid
 thread_create(void (*fn) (void *), void *parg)
 {
+	int enabled = interrupts_off();
 	// Find an available thread id
 	Tid id = -1;
 	for (int i=0; i<THREAD_MAX_THREADS; ++i) {
@@ -226,16 +228,21 @@ thread_create(void (*fn) (void *), void *parg)
 			break;
 		}
 	}
-	if (id < 0)
+	if (id < 0) {
+		interrupts_set(enabled);
 		return THREAD_NOMORE;	// No thread ids available
+	}
 	
 	struct thread *th = (struct thread *) malloc(sizeof(struct thread));
-	if (th == NULL)
+	if (th == NULL) {
+		interrupts_set(enabled);
 		return THREAD_NOMEMORY;	// No memory available for thread structure
+	}
 	th->stack = malloc(THREAD_MIN_STACK);
 	if (th->stack == NULL) {
 		// No memory available for thread stack
 		free(th);	// Free the previously allocated memory for thread structure
+		interrupts_set(enabled);
 		return THREAD_NOMEMORY;
 	}
 
@@ -261,11 +268,13 @@ thread_create(void (*fn) (void *), void *parg)
 		// Free previously allocated memory
 		free(th->stack);
 		free(th);
+		interrupts_set(enabled);
 		return THREAD_NOMEMORY;
 	}
 
 	// Thread id of newly created thread is now taken
 	Tid_taken[id] = true;
+	interrupts_set(enabled);
 	return id;
 }
 
@@ -273,13 +282,16 @@ thread_create(void (*fn) (void *), void *parg)
 Tid
 thread_yield(Tid want_tid)
 {
+	int enabled = interrupts_off();
 	struct thread_list *want_thread, *current_thread;
 	current_thread = rq.head;
 
 	if (want_tid == THREAD_ANY) {
 		// Yield to the next thread in the queue
-		if (rq.size == 1)
+		if (rq.size == 1) {
+			interrupts_set(enabled);
 			return THREAD_NONE;	// There are no more threads in the queue to yield to
+		}
 
 		want_thread = rq.head->next;
 		want_tid = want_thread->thread->id;
@@ -296,8 +308,10 @@ thread_yield(Tid want_tid)
 		// Find the thread in the ready queue
 		struct thread_list *prev;
 		want_thread = find_in_queue_with_prev(&rq, want_tid, &prev);
-		if (want_thread == NULL)
+		if (want_thread == NULL) {
+			interrupts_set(enabled);
 			return THREAD_INVALID;	// Thread with id want_tid does not exist in the ready queue
+		}
 
 		// Move current thread to end of ready queue and 
 		// assign the wanted thread in the queue as the new head
@@ -316,12 +330,14 @@ thread_yield(Tid want_tid)
 		else {
 			rq.head->thread->status = THREAD_RUNNING;	// Set current thread status to running
 			clear_queue(&eq);	// Clear exit queue
+			interrupts_set(enabled);
 			return want_tid;
 		}
 	}
 	setcontext_called = true;
 	setcontext(&want_thread->thread->context);	// Switch to context of wanted thread
 	
+	interrupts_set(enabled);
 	return want_tid;
 }
 
@@ -329,6 +345,7 @@ thread_yield(Tid want_tid)
 void
 thread_exit()
 {
+	interrupts_off();
 	Tid_taken[rq.head->thread->id] = false;	// This Tid can be reused
 
 	// Pop head of ready queue
@@ -361,6 +378,7 @@ thread_exit()
 Tid
 thread_kill(Tid tid)
 {
+	int enabled = interrupts_off();
 	if (tid == rq.head->thread->id)
 		return THREAD_INVALID;	// Cannot kill currently running thread
 
@@ -374,6 +392,7 @@ thread_kill(Tid tid)
 	// Set status of the killed thread to exited
 	// The thread will exit next time it runs
 	thread2kill->thread->status = THREAD_EXITED;
+	interrupts_set(enabled);
 	return killed_id;
 }
 
