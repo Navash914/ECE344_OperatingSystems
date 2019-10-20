@@ -1,2 +1,5 @@
 marker/
-tester.out
+*.log
+*.out
+os-007/
+.vscode
