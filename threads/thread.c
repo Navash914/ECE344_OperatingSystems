@@ -43,6 +43,8 @@ struct thread {
 	void *stack;				// Pointer to memory allocated for thread stack
 };
 
+struct thread *threads[THREAD_MAX_THREADS] = { NULL };
+
 //	=================	Helper Functions	=================	//
 
 // Find thread with given tid in queue
@@ -177,6 +179,14 @@ void clear_queue(thread_queue *q) {
 	q->size = 0;
 }
 
+// Changes status of given thread.
+// If current status of thread is THREAD_EXITED,
+// the status is not changed
+void set_thread_status(struct thread *th, THREAD_STATUS status) {
+	if (th->status != THREAD_EXITED)
+		th->status = status;
+}
+
 //	=================	End of Helper Functions		=================	//
 
 // Thread stub function that all threads enter when they are first run
@@ -186,7 +196,7 @@ thread_stub(void (*thread_main)(void *), void *arg)
 	interrupts_on();
 	if (rq.head->thread->status == THREAD_EXITED)
 		thread_exit();	// Thread was killed before it was run
-	rq.head->thread->status = THREAD_RUNNING;	// Set thread to running
+	set_thread_status(rq.head->thread, THREAD_RUNNING);	// Set thread to running
 	clear_queue(&eq);	// Clear exit queue
 	thread_main(arg); // call thread_main() function with arg
 	thread_exit();		// Exit thread when execution is done
@@ -208,6 +218,7 @@ thread_init(void)
 	// Add thread to the ready queue
 	append_to_queue(&rq, th);
 	Tid_taken[0] = true;
+	threads[0] = th;
 }
 
 // Returns id of currently running thread
@@ -277,6 +288,8 @@ thread_create(void (*fn) (void *), void *parg)
 
 	// Thread id of newly created thread is now taken
 	Tid_taken[id] = true;
+	threads[id] = th;
+
 	interrupts_set(enabled);
 	return id;
 }
@@ -323,7 +336,7 @@ thread_yield(Tid want_tid)
 	}
 
 	volatile bool setcontext_called = false;		// Flag to check if returning from a different thread
-	current_thread->thread->status = THREAD_READY;	// Set current thread (which is about to yield) to ready state
+	set_thread_status(current_thread->thread, THREAD_READY);	// Set current thread (which is about to yield) to ready state
 	getcontext(&current_thread->thread->context);	// Save context for current thread
 
 	if (setcontext_called) {
@@ -331,7 +344,7 @@ thread_yield(Tid want_tid)
 		if (rq.head->thread->status == THREAD_EXITED)
 			thread_exit();	// This thread was marked to exit
 		else {
-			rq.head->thread->status = THREAD_RUNNING;	// Set current thread status to running
+			set_thread_status(rq.head->thread, THREAD_RUNNING);	// Set current thread status to running
 			clear_queue(&eq);	// Clear exit queue
 			interrupts_set(enabled);
 			return want_tid;
@@ -350,6 +363,7 @@ thread_exit()
 {
 	interrupts_off();
 	Tid_taken[thread_id()] = false;	// This Tid can be reused
+	threads[thread_id()] = NULL;
 
 	// Wakeup all threads waiting on this thread's exit
 	thread_wakeup(thread_wait_queues[thread_id()], 1);
@@ -395,16 +409,19 @@ thread_kill(Tid tid)
 	if (tid == rq.head->thread->id)
 		return THREAD_INVALID;	// Cannot kill currently running thread
 
-	// Find the requested thread
-	struct thread_list *thread2kill = find_in_queue(&rq, tid);
+	if (tid < 0 || tid >= THREAD_MAX_THREADS)
+		return THREAD_INVALID;	// Invalid tid
+
+	// Get the requested thread
+	struct thread *thread2kill = threads[tid];
 	if (thread2kill == NULL)
-		return THREAD_INVALID;	// Requested thread does not exist on the ready queue
-	
-	Tid killed_id = thread2kill->thread->id;
+		return THREAD_INVALID;	// Requested thread does not exist
+
+	Tid killed_id = thread2kill->id;
 
 	// Set status of the killed thread to exited
 	// The thread will exit next time it runs
-	thread2kill->thread->status = THREAD_EXITED;
+	set_thread_status(thread2kill, THREAD_EXITED);
 	interrupts_set(enabled);
 	return killed_id;
 }
@@ -458,7 +475,7 @@ thread_sleep(struct wait_queue *queue)
 	int ret_id = new_thread->thread->id;
 
 	volatile bool setcontext_called = false;			// Flag to check if returning from a different thread
-	current_thread->thread->status = THREAD_BLOCKED;	// Set current thread (which is about to sleep) to blocked state
+	set_thread_status(current_thread->thread, THREAD_BLOCKED);	// Set current thread (which is about to sleep) to blocked state
 	getcontext(&current_thread->thread->context);		// Save context for current thread
 
 	if (setcontext_called) {
@@ -466,7 +483,7 @@ thread_sleep(struct wait_queue *queue)
 		if (rq.head->thread->status == THREAD_EXITED)
 			thread_exit();	// This thread was marked to exit
 		else {
-			rq.head->thread->status = THREAD_RUNNING;	// Set current thread status to running
+			set_thread_status(rq.head->thread, THREAD_RUNNING);	// Set current thread status to running
 			clear_queue(&eq);	// Clear exit queue
 			interrupts_set(enabled);
 			return ret_id;
@@ -494,7 +511,7 @@ thread_wakeup(struct wait_queue *queue, int all)
 	int count = 0;
 	do {
 		struct thread_list *node = pop_queue(queue);
-		node->thread->status = THREAD_READY;
+		set_thread_status(node->thread, THREAD_READY);
 		append_node_to_queue(&rq, node);
 		count++;
 	} while (all && queue->head != NULL);
@@ -515,7 +532,7 @@ thread_wait(Tid tid)
 		return THREAD_INVALID;
 	}
 
-	int ret_id = thread_id();
+	int ret_id = tid;
 	struct wait_queue *wq = thread_wait_queues[tid];
 	if (wq == NULL) {
 		thread_wait_queues[tid] = wait_queue_create();
