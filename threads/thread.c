@@ -5,9 +5,6 @@
 #include "thread.h"
 #include "interrupt.h"
 
-// Global array to check which thread ids are taken
-bool Tid_taken[THREAD_MAX_THREADS] = {false};
-
 // Linked list for holding thread information structs
 struct thread_list {
 	struct thread *thread;
@@ -43,6 +40,9 @@ struct thread {
 	void *stack;				// Pointer to memory allocated for thread stack
 };
 
+// Global array that stores pointers to threads based on their thread id.
+// If a thread id is available, the pointer is NULL
+// Otherwise, the pointer points to the thread struct for that thread
 struct thread *threads[THREAD_MAX_THREADS] = { NULL };
 
 //	=================	Helper Functions	=================	//
@@ -217,7 +217,6 @@ thread_init(void)
 
 	// Add thread to the ready queue
 	append_to_queue(&rq, th);
-	Tid_taken[0] = true;
 	threads[0] = th;
 }
 
@@ -236,7 +235,7 @@ thread_create(void (*fn) (void *), void *parg)
 	// Find an available thread id
 	Tid id = -1;
 	for (int i=0; i<THREAD_MAX_THREADS; ++i) {
-		if (!Tid_taken[i]) {
+		if (threads[i] == NULL) {
 			// Found an available thread id
 			id = i;
 			break;
@@ -287,7 +286,6 @@ thread_create(void (*fn) (void *), void *parg)
 	}
 
 	// Thread id of newly created thread is now taken
-	Tid_taken[id] = true;
 	threads[id] = th;
 
 	interrupts_set(enabled);
@@ -362,8 +360,7 @@ void
 thread_exit()
 {
 	interrupts_off();
-	Tid_taken[thread_id()] = false;	// This Tid can be reused
-	threads[thread_id()] = NULL;
+	threads[thread_id()] = NULL;	// This Tid can be reused
 
 	// Wakeup all threads waiting on this thread's exit
 	thread_wakeup(thread_wait_queues[thread_id()], 1);
@@ -406,7 +403,7 @@ Tid
 thread_kill(Tid tid)
 {
 	int enabled = interrupts_off();
-	if (tid == rq.head->thread->id)
+	if (tid == thread_id())
 		return THREAD_INVALID;	// Cannot kill currently running thread
 
 	if (tid < 0 || tid >= THREAD_MAX_THREADS)
@@ -526,7 +523,7 @@ thread_wait(Tid tid)
 {
 	int enabled = interrupts_off();
 	
-	if (tid < 0 || tid == thread_id() || !Tid_taken[tid]) {
+	if (tid < 0 || tid == thread_id() || threads[tid] == NULL) {
 		// Invalid tid
 		interrupts_set(enabled);
 		return THREAD_INVALID;
