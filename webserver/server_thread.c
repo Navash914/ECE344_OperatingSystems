@@ -36,7 +36,7 @@ typedef struct lru {
 	LRUEntry *tail;
 	int size;
 
-	pthread_mutex_t lock_lru;
+	//pthread_mutex_t lock_lru;
 } LRUList;
 
 typedef struct cache {
@@ -50,9 +50,7 @@ typedef struct cache {
 	int rc;
 	pthread_cond_t cv_rc;
 
-	pthread_mutex_t lock_entry;
-	pthread_mutex_t lock_exit;
-	pthread_mutex_t lock_data;
+	pthread_mutex_t lock;
 
 } Cache;
 
@@ -82,19 +80,19 @@ struct server {
 //	=================	LRU Functions	=================	//
 
 LRUEntry* find_in_LRU(LRUList *LRU, CacheEntry *target) {
-	pthread_mutex_lock(&LRU->lock_lru);
+	//pthread_mutex_lock(&LRU->lock_lru);
 	LRUEntry* current = LRU->head;
 	while (current != NULL) {
 		if (current->entry == target)
 			break;
 		current = current->next;
 	}
-	pthread_mutex_unlock(&LRU->lock_lru);
+	//pthread_mutex_unlock(&LRU->lock_lru);
 	return current;
 }
 
 LRUEntry* find_in_LRU_with_prev(LRUList *LRU, CacheEntry *target, LRUEntry **prev) {
-	pthread_mutex_lock(&LRU->lock_lru);
+	//pthread_mutex_lock(&LRU->lock_lru);
 	*prev = NULL;
 	LRUEntry* current = LRU->head;
 	while (current != NULL) {
@@ -103,13 +101,13 @@ LRUEntry* find_in_LRU_with_prev(LRUList *LRU, CacheEntry *target, LRUEntry **pre
 		*prev = current;
 		current = current->next;
 	}
-	pthread_mutex_unlock(&LRU->lock_lru);
+	//pthread_mutex_unlock(&LRU->lock_lru);
 	return current;
 }
 
 // Appends given node to queue
 void add_to_LRU(LRUList *LRU, CacheEntry *entry) {
-	pthread_mutex_lock(&LRU->lock_lru);
+	//pthread_mutex_lock(&LRU->lock_lru);
 	LRUEntry *node = (LRUEntry *) malloc(sizeof(LRUEntry));
 	assert(node);
 	node->entry = entry;
@@ -123,14 +121,14 @@ void add_to_LRU(LRUList *LRU, CacheEntry *entry) {
 		LRU->tail = LRU->tail->next;	// Move tail to new end of queue
 	}
 	LRU->size++;	// Update queue size
-	pthread_mutex_unlock(&LRU->lock_lru);
+	//pthread_mutex_unlock(&LRU->lock_lru);
 }
 
 // Moves the head of the queue to the end
 void move_head_to_end(LRUList *LRU) {
-	pthread_mutex_lock(&LRU->lock_lru);
+	//pthread_mutex_lock(&LRU->lock_lru);
 	if (LRU->size <= 1) {
-		pthread_mutex_unlock(&LRU->lock_lru);
+		//pthread_mutex_unlock(&LRU->lock_lru);
 		return;
 	}
 	LRUEntry *old_head = LRU->head;
@@ -138,17 +136,17 @@ void move_head_to_end(LRUList *LRU) {
 	LRU->tail->next = old_head;
 	LRU->tail = old_head;
 	old_head->next = NULL;
-	pthread_mutex_unlock(&LRU->lock_lru);
+	//pthread_mutex_unlock(&LRU->lock_lru);
 }
 
 void move_node_to_end(LRUList *LRU, CacheEntry *entry) {
-	pthread_mutex_lock(&LRU->lock_lru);
+	//pthread_mutex_lock(&LRU->lock_lru);
 	if (LRU->size <= 1)
 		return;
 	LRUEntry *prev;
 	LRUEntry *node = find_in_LRU_with_prev(LRU, entry, &prev);
 	if (!node) {
-		pthread_mutex_unlock(&LRU->lock_lru);
+		//pthread_mutex_unlock(&LRU->lock_lru);
 		return;
 	}
 	if (node == LRU->head)
@@ -159,30 +157,30 @@ void move_node_to_end(LRUList *LRU, CacheEntry *entry) {
 		LRU->tail->next = node;
 		LRU->tail = node;
 	}
-	pthread_mutex_unlock(&LRU->lock_lru);
+	//pthread_mutex_unlock(&LRU->lock_lru);
 }
 
 // Removes and returns and the head of the queue
 LRUEntry* pop_LRU(LRUList *LRU) {
-	pthread_mutex_lock(&LRU->lock_lru);
+	//pthread_mutex_lock(&LRU->lock_lru);
 	LRUEntry* old_head = LRU->head;
 	LRU->head = LRU->head->next;
 	old_head->next = NULL;
 	LRU->size--;	// Update queue size
-	pthread_mutex_unlock(&LRU->lock_lru);
+	//pthread_mutex_unlock(&LRU->lock_lru);
 	return old_head;
 }
 
 // Removes target node from queue
 void remove_from_LRU(LRUList *LRU, CacheEntry *target) {
-	pthread_mutex_lock(&LRU->lock_lru);
+	//pthread_mutex_lock(&LRU->lock_lru);
 	if (LRU->size == 1) {
 		// This is the only node in the queue
 		free(LRU->head);
 		LRU->head = NULL;
 		LRU->tail = NULL;
 		LRU->size = 0;
-		pthread_mutex_unlock(&LRU->lock_lru);
+		//pthread_mutex_unlock(&LRU->lock_lru);
 		return;
 	}
 
@@ -207,11 +205,11 @@ void remove_from_LRU(LRUList *LRU, CacheEntry *target) {
 		free(current);
 		LRU->size--;
 	}
-	pthread_mutex_unlock(&LRU->lock_lru);
+	//pthread_mutex_unlock(&LRU->lock_lru);
 }
 
 LRUEntry* remove_node_from_LRU(LRUList *LRU, LRUEntry *target, LRUEntry *prev) {
-	pthread_mutex_lock(&LRU->lock_lru);
+	//pthread_mutex_lock(&LRU->lock_lru);
 	LRUEntry *ret;
 	if (LRU->size == 1) {
 		// This is the only node in the queue
@@ -234,7 +232,7 @@ LRUEntry* remove_node_from_LRU(LRUList *LRU, LRUEntry *target, LRUEntry *prev) {
 	}
 	free(target);
 	LRU->size--;	// Update queue size
-	pthread_mutex_unlock(&LRU->lock_lru);
+	//pthread_mutex_unlock(&LRU->lock_lru);
 	return ret;
 } 
 
@@ -242,7 +240,7 @@ LRUEntry* remove_node_from_LRU(LRUList *LRU, LRUEntry *target, LRUEntry *prev) {
 void clear_LRU(LRUList *LRU) {
 	if (LRU == NULL)
 		return;
-	pthread_mutex_lock(&LRU->lock_lru);
+	//pthread_mutex_lock(&LRU->lock_lru);
 	while (LRU->head != NULL) {
 		LRUEntry *next = LRU->head->next;
 		free(LRU->head);
@@ -250,12 +248,12 @@ void clear_LRU(LRUList *LRU) {
 	}
 	LRU->tail = NULL;
 	LRU->size = 0;
-	pthread_mutex_unlock(&LRU->lock_lru);
+	//pthread_mutex_unlock(&LRU->lock_lru);
 }
 
 void destroy_LRU(LRUList *LRU) {
 	clear_LRU(LRU);
-	pthread_mutex_destroy(&LRU->lock_lru);
+	//pthread_mutex_destroy(&LRU->lock_lru);
 	free(LRU);
 }
 
@@ -265,10 +263,7 @@ void destroy_LRU(LRUList *LRU) {
 // ======================== Hashtable Operations ========================
 
 CacheEntry* cache_lookup(Cache *cache, char *filename) {
-	pthread_mutex_lock(&cache->lock_entry);
-	cache->rc = cache->rc + 1;
-	pthread_mutex_unlock(&cache->lock_entry);
-
+	pthread_mutex_lock(&cache->lock);
 	unsigned long key = hash(filename) % cache->capacity;
 	CacheEntry *entry = &cache->table[key];
 	int hit = 0;
@@ -283,16 +278,11 @@ CacheEntry* cache_lookup(Cache *cache, char *filename) {
 	CacheEntry *ret;
 	if (hit) {
 		ret = entry;
-		entry->in_use = 1;
+		entry->in_use++;
 		move_node_to_end(cache->LRU, entry);
 	} else ret = NULL;
 
-	pthread_mutex_lock(&cache->lock_exit);
-	cache->rc = cache->rc - 1;
-	if (cache->rc == 0)
-		pthread_cond_broadcast(&cache->cv_rc);
-	pthread_mutex_unlock(&cache->lock_exit);
-	
+	pthread_mutex_unlock(&cache->lock);
 	return ret;
 }
 
@@ -332,43 +322,38 @@ void remove_from_cache(Cache *cache, CacheEntry *target) {
 }
 
 unsigned long cache_evict(Cache *cache, unsigned long amount_to_evict) {
+	return 0;
 	// No need for mutex as this function only called from cache_insert, which already has mutex
 	unsigned long evicted_amount = 0;
 	LRUEntry *current = cache->LRU->head;
 	LRUEntry *prev = NULL;
 	while (current != NULL) {
-		if (!current->entry->in_use) {
+		if (current->entry->in_use > 0) {
+			prev = current;
+			current = current->next;
+		} else {
 			CacheEntry *to_destroy = current->entry;
 			evicted_amount += current->entry->data->file_size;
 			current = remove_node_from_LRU(cache->LRU, current, prev);
 			remove_from_cache(cache, to_destroy);
 			if (evicted_amount >= amount_to_evict)
 				break;
-		} else {
-			prev = current;
-			current = current->next;
 		}
 	}
 	return evicted_amount;
 }
 
 int cache_insert(Cache *cache, struct file_data *file) {
-	pthread_mutex_lock(&cache->lock_entry);
-
-	pthread_mutex_lock(&cache->lock_data);
-	while (cache->rc > 0)
-		pthread_cond_wait(&cache->cv_rc, &cache->lock_data);
+	pthread_mutex_lock(&cache->lock);
 
 	if (cache_exists(cache, file->file_name)) {
-		pthread_mutex_unlock(&cache->lock_data);
-		pthread_mutex_unlock(&cache->lock_entry);
+		pthread_mutex_unlock(&cache->lock);
 		return 0;
 	}
 
 	if (file->file_size > cache->max_cache_size) {
 		// File too large. Cannot cache.
-		pthread_mutex_unlock(&cache->lock_data);
-		pthread_mutex_unlock(&cache->lock_entry);
+		pthread_mutex_unlock(&cache->lock);
 		return 0;
 	}
 
@@ -377,11 +362,13 @@ int cache_insert(Cache *cache, struct file_data *file) {
 		cache->size -= evicted;
 		if (cache->size + file->file_size > cache->max_cache_size) {
 			// Couldn't evict enough
-			pthread_mutex_unlock(&cache->lock_data);
-			pthread_mutex_unlock(&cache->lock_entry);
+			pthread_mutex_unlock(&cache->lock);
 			return 0;
 		}
-	}	
+	}
+	
+	//pthread_mutex_unlock(&cache->lock);
+	//return 0;	
 	
 	unsigned long key = hash(file->file_name) % cache->capacity;
 	CacheEntry *entry = &cache->table[key];
@@ -389,7 +376,11 @@ int cache_insert(Cache *cache, struct file_data *file) {
 		entry = entry->next;
 	}
 
+	//pthread_mutex_unlock(&cache->lock);
+	//return 0;
+
 	entry->next = (CacheEntry *) malloc(sizeof(CacheEntry));
+	assert(entry->next);
 	entry = entry->next;
 	entry->data = file;
 	entry->in_use = 0;
@@ -397,8 +388,7 @@ int cache_insert(Cache *cache, struct file_data *file) {
 	cache->size += file->file_size;
 
 	add_to_LRU(cache->LRU, entry);
-	pthread_mutex_unlock(&cache->lock_data);
-	pthread_mutex_unlock(&cache->lock_entry);
+	pthread_mutex_unlock(&cache->lock);
 	return 1;
 }
 
@@ -416,17 +406,21 @@ void cache_clear(Cache *cache) {
 }
 
 void cache_destroy(Cache *cache) {
+	if (cache == NULL)
+		return;
+	pthread_mutex_lock(&cache->lock);
 	cache_clear(cache);
 	free(cache->table);
 
 	destroy_LRU(cache->LRU);
 
-	pthread_mutex_destroy(&cache->lock_entry);
-	pthread_mutex_destroy(&cache->lock_exit);
-	pthread_mutex_destroy(&cache->lock_data);
-	pthread_cond_destroy(&cache->cv_rc);
+	//pthread_mutex_destroy(&cache->lock_entry);
+	//pthread_mutex_destroy(&cache->lock_exit);
+	//pthread_mutex_destroy(&cache->lock_data);
+	//pthread_cond_destroy(&cache->cv_rc);
 
 	free(cache);
+	pthread_mutex_unlock(&cache->lock);
 }
 
 // ======================== End of Hashtable Operations ========================
@@ -472,8 +466,10 @@ do_server_request(struct server *sv, int connfd)
 	}
 
 	// Check for cache hit
-	CacheEntry *cache_value = cache_lookup(sv->cache, data->file_name);
-	if (cache_value) {
+	CacheEntry *cache_value = NULL;
+	if (sv->cache)
+		cache_value = cache_lookup(sv->cache, data->file_name);
+	if (cache_value != NULL) {
 		file_data_free(data);
 		request_set_data(rq, cache_value->data);
 	} else {
@@ -485,19 +481,25 @@ do_server_request(struct server *sv, int connfd)
 			goto out;
 		} else {
 			// Add file to cache
-			cache_inserted = cache_insert(sv->cache, data);
+			printf("About to add file to cache\n");
+			if (sv->cache)
+				cache_inserted = cache_insert(sv->cache, data);
+			printf("Cache inserted: %d\n", cache_inserted);
 		}
 	}
 
 	
 	/* send file to client */
 	request_sendfile(rq);
-	if (cache_value)
-		cache_value->in_use = 0;
+	if (cache_value) {
+		pthread_mutex_lock(&sv->cache->lock);
+		cache_value->in_use--;
+		pthread_mutex_unlock(&sv->cache->lock);
+	}
 out:
 	request_destroy(rq);
-	if (!cache_inserted)
-		file_data_free(data);
+	//if (!cache_inserted)
+	//	file_data_free(data);
 }
 
 /* entry point functions */
@@ -606,14 +608,15 @@ server_init(int nr_threads, int max_requests, int max_cache_size)
 		Cache *cache = sv->cache;
 
 		cache->max_cache_size = max_cache_size;
-		cache->capacity = 300;
+		cache->capacity = 5000;
 		cache->table = (CacheEntry *) calloc(sv->cache->capacity, sizeof(CacheEntry));
 		assert(cache->table);
 		cache->size = 0;
-		pthread_mutex_init(&cache->lock_entry, NULL);
-		pthread_mutex_init(&cache->lock_exit, NULL);
-		pthread_mutex_init(&cache->lock_data, NULL);
-		pthread_cond_init(&cache->cv_rc, NULL);
+		pthread_mutex_init(&cache->lock, NULL);
+		//pthread_mutex_init(&cache->lock_entry, NULL);
+		//pthread_mutex_init(&cache->lock_exit, NULL);
+		//pthread_mutex_init(&cache->lock_data, NULL);
+		//pthread_cond_init(&cache->cv_rc, NULL);
 
 		cache->LRU = (LRUList *) malloc(sizeof(LRUList));
 		assert(cache->LRU);
@@ -621,8 +624,8 @@ server_init(int nr_threads, int max_requests, int max_cache_size)
 		LRU->head = NULL;
 		LRU->tail = NULL;
 		LRU->size = 0;
-		pthread_mutex_init(&LRU->lock_lru, NULL);
-	}
+		//pthread_mutex_init(&LRU->lock_lru, NULL);
+	} else sv->cache = NULL;
 
 	return sv;
 }
@@ -660,5 +663,12 @@ server_exit(struct server *sv)
 	/* make sure to free any allocated resources */
 	free(sv->buffer.requests);
 	free(sv->threads);
+	//if (sv->cache)
+	//	cache_destroy(sv->cache);
+
+	//pthread_cond_destroy(&sv->cv_empty);
+	//pthread_cond_destroy(&sv->cv_full);
+	//pthread_mutex_destroy(&sv->lock);
+
 	free(sv);
 }
