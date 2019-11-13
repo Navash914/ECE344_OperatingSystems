@@ -278,6 +278,8 @@ CacheEntry* cache_lookup(Cache *cache, char *filename) {
 	CacheEntry *ret;
 	if (hit) {
 		ret = entry;
+		entry->in_use++;
+		printf("%lu is being used. Use count: %d\n", (unsigned long) entry, entry->in_use);
 		move_node_to_end(cache->LRU, entry);
 	} else ret = NULL;
 
@@ -316,12 +318,13 @@ void remove_from_cache(Cache *cache, CacheEntry *target) {
 		prev->next = target->next;
 		target->next = NULL;
 		cache->size -= target->data->file_size;
-		file_data_free(target->data);
+		//file_data_free(target->data);
 		free(target);
 	}
 }
 
 unsigned long cache_evict(Cache *cache, unsigned long amount_to_evict) {
+	//return 0;
 	// No need for mutex as this function only called from cache_insert, which already has mutex
 	unsigned long evicted_amount = 0;
 	LRUEntry *current = cache->LRU->head;
@@ -344,16 +347,16 @@ unsigned long cache_evict(Cache *cache, unsigned long amount_to_evict) {
 }
 
 int cache_insert(Cache *cache, struct file_data *file) {
-	//pthread_mutex_lock(&cache->lock);
+	pthread_mutex_lock(&cache->lock);
 
 	if (cache_exists(cache, file->file_name)) {
-		//pthread_mutex_unlock(&cache->lock);
+		pthread_mutex_unlock(&cache->lock);
 		return 0;
 	}
 
 	if (file->file_size > cache->max_cache_size) {
 		// File too large. Cannot cache.
-		//pthread_mutex_unlock(&cache->lock);
+		pthread_mutex_unlock(&cache->lock);
 		return 0;
 	}
 
@@ -361,7 +364,7 @@ int cache_insert(Cache *cache, struct file_data *file) {
 		cache_evict(cache, file->file_size - (cache->max_cache_size - cache->size));
 		if (cache->size + file->file_size > cache->max_cache_size) {
 			// Couldn't evict enough
-			//pthread_mutex_unlock(&cache->lock);
+			pthread_mutex_unlock(&cache->lock);
 			return 0;
 		}
 	}
@@ -387,7 +390,7 @@ int cache_insert(Cache *cache, struct file_data *file) {
 	cache->size += file->file_size;
 
 	add_to_LRU(cache->LRU, entry);
-	//pthread_mutex_unlock(&cache->lock);
+	pthread_mutex_unlock(&cache->lock);
 	return 1;
 }
 
@@ -469,10 +472,10 @@ do_server_request(struct server *sv, int connfd)
 	if (sv->cache)
 		cache_value = cache_lookup(sv->cache, data->file_name);
 	if (cache_value != NULL) {
-		pthread_mutex_lock(&sv->cache->lock);
-		cache_value->in_use++;
-		printf("%lu is being used. Use count: %d\n", (unsigned long) cache_value, cache_value->in_use);
-		pthread_mutex_unlock(&sv->cache->lock);
+		//pthread_mutex_lock(&sv->cache->lock);
+		//cache_value->in_use++;
+		//printf("%lu is being used. Use count: %d\n", (unsigned long) cache_value, cache_value->in_use);
+		//pthread_mutex_unlock(&sv->cache->lock);
 		file_data_free(data);
 		request_set_data(rq, cache_value->data);
 	} else {
@@ -484,12 +487,12 @@ do_server_request(struct server *sv, int connfd)
 			goto out;
 		} else {
 			// Add file to cache
-			pthread_mutex_lock(&sv->cache->lock);
+			//pthread_mutex_lock(&sv->cache->lock);
 			printf("About to add file to cache\n");
 			if (sv->cache)
 				cache_inserted = cache_insert(sv->cache, data);
 			printf("Cache inserted: %d\n", cache_inserted);
-			pthread_mutex_unlock(&sv->cache->lock);
+			//pthread_mutex_unlock(&sv->cache->lock);
 		}
 	}
 
