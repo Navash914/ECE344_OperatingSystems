@@ -43,19 +43,26 @@ testfs_read_data(struct inode *in, char *buf, off_t start, size_t size)
 	long block_nr = start / BLOCK_SIZE; // logical block number in the file
 	long block_ix = start % BLOCK_SIZE; //  index or offset in the block
 	int ret;
+	size_t pos = 0;
 
 	assert(buf);
 	if (start + (off_t) size > in->in.i_size) {
 		size = in->in.i_size - start;
 	}
-	if (block_ix + size > BLOCK_SIZE) {
-		TBD();
+
+	while (size > 0) {
+		if ((ret = testfs_read_block(in, block_nr, block)) < 0)
+			return ret;
+		size_t size_to_read = MIN((size_t) (BLOCK_SIZE - block_ix), size);
+		memcpy(buf+pos, block + block_ix, size_to_read);
+		pos += size_to_read;
+		size -= size_to_read;
+		block_nr++;
+		block_ix = 0;
 	}
-	if ((ret = testfs_read_block(in, block_nr, block)) < 0)
-		return ret;
-	memcpy(buf, block + block_ix, size);
+
 	/* return the number of bytes read or any error */
-	return size;
+	return pos;
 }
 
 /* given logical block number, allocate a new physical block, if it does not
@@ -125,20 +132,27 @@ testfs_write_data(struct inode *in, const char *buf, off_t start, size_t size)
 	long block_nr = start / BLOCK_SIZE; // logical block number in the file
 	long block_ix = start % BLOCK_SIZE; //  index or offset in the block
 	int ret;
+	size_t pos = 0;
 
-	if (block_ix + size > BLOCK_SIZE) {
-		TBD();
+	while (size > 0) {
+		ret = testfs_allocate_block(in, block_nr, block);
+		if (ret < 0)
+			return ret;
+		size_t size_to_write = MIN((size_t) (BLOCK_SIZE - block_ix), size);
+		memcpy(block + block_ix, buf + pos, size_to_write);
+		write_blocks(in->sb, block, ret, 1);
+		pos += size_to_write;
+		size -= size_to_write;
+		block_nr++;
+		block_ix = 0;
 	}
-	/* ret is the newly allocated physical block number */
-	ret = testfs_allocate_block(in, block_nr, block);
-	if (ret < 0)
-		return ret;
-	memcpy(block + block_ix, buf, size);
-	write_blocks(in->sb, block, ret, 1);
-	/* increment i_size by the number of bytes written. */
+
+	size = pos;
+
 	if (size > 0)
 		in->in.i_size = MAX(in->in.i_size, start + (off_t) size);
 	in->i_flags |= I_FLAGS_DIRTY;
+
 	/* return the number of bytes written or any error */
 	return size;
 }
