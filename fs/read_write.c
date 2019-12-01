@@ -4,6 +4,9 @@
 #include "block.h"
 #include "inode.h"
 
+#define MAX_BLOCK_NR NR_DIRECT_BLOCKS + NR_INDIRECT_BLOCKS + NR_INDIRECT_BLOCKS * NR_INDIRECT_BLOCKS
+#define MAX_FILE_SIZE (long) (MAX_BLOCK_NR) * (long) (BLOCK_SIZE)
+
 /* given logical block number, read the corresponding physical block into block.
  * return physical block number.
  * returns 0 if physical block does not exist.
@@ -11,6 +14,8 @@
 static int
 testfs_read_block(struct inode *in, int log_block_nr, char *block)
 {
+	if (log_block_nr >= MAX_BLOCK_NR)
+		return -EFBIG;
 	int phy_block_nr = 0;
 
 	assert(log_block_nr >= 0);
@@ -51,6 +56,8 @@ testfs_read_block(struct inode *in, int log_block_nr, char *block)
 int
 testfs_read_data(struct inode *in, char *buf, off_t start, size_t size)
 {
+	if (start >= MAX_FILE_SIZE)
+		return -EFBIG;
 	char block[BLOCK_SIZE];
 	long block_nr = start / BLOCK_SIZE; // logical block number in the file
 	long block_ix = start % BLOCK_SIZE; //  index or offset in the block
@@ -58,9 +65,8 @@ testfs_read_data(struct inode *in, char *buf, off_t start, size_t size)
 	size_t pos = 0;
 
 	assert(buf);
-	if (start + (off_t) size > in->in.i_size) {
+	if (start + (off_t) size > in->in.i_size)
 		size = in->in.i_size - start;
-	}
 
 	while (size > 0) {
 		if ((ret = testfs_read_block(in, block_nr, block)) < 0)
@@ -83,6 +89,8 @@ testfs_read_data(struct inode *in, char *buf, off_t start, size_t size)
 static int
 testfs_allocate_block(struct inode *in, int log_block_nr, char *block)
 {
+	if (log_block_nr >= MAX_BLOCK_NR)
+		return -EFBIG;
 	int phy_block_nr;
 	char indirect[BLOCK_SIZE], dindirect[BLOCK_SIZE];
 	int indirect_allocated = 0, dindirect_allocated = 0;
@@ -197,6 +205,8 @@ testfs_allocate_block(struct inode *in, int log_block_nr, char *block)
 int
 testfs_write_data(struct inode *in, const char *buf, off_t start, size_t size)
 {
+	if (start >= MAX_FILE_SIZE)
+		return -EFBIG;
 	char block[BLOCK_SIZE];
 	long block_nr = start / BLOCK_SIZE; // logical block number in the file
 	long block_ix = start % BLOCK_SIZE; //  index or offset in the block
@@ -205,8 +215,11 @@ testfs_write_data(struct inode *in, const char *buf, off_t start, size_t size)
 
 	while (size > 0) {
 		ret = testfs_allocate_block(in, block_nr, block);
-		if (ret < 0)
+		if (ret < 0) {
+			if (pos > 0)
+				in->in.i_size = MAX(in->in.i_size, start + (off_t) pos);
 			return ret;
+		}
 		size_t size_to_write = MIN((size_t) (BLOCK_SIZE - block_ix), size);
 		memcpy(block + block_ix, buf + pos, size_to_write);
 		write_blocks(in->sb, block, ret, 1);
@@ -218,8 +231,9 @@ testfs_write_data(struct inode *in, const char *buf, off_t start, size_t size)
 
 	size = pos;
 
-	if (size > 0)
+	if (size > 0) {
 		in->in.i_size = MAX(in->in.i_size, start + (off_t) size);
+	}
 	in->i_flags |= I_FLAGS_DIRTY;
 
 	/* return the number of bytes written or any error */
