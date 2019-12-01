@@ -126,7 +126,7 @@ testfs_allocate_block(struct inode *in, int log_block_nr, char *block)
 				return phy_block_nr;
 			dindirect_allocated = 1;
 			in->in.i_dindirect = phy_block_nr;
-		} else {	/* read indirect block */
+		} else {	/* read double indirect block */
 			read_blocks(in->sb, dindirect, in->in.i_dindirect, 1);
 		}
 
@@ -151,7 +151,7 @@ testfs_allocate_block(struct inode *in, int log_block_nr, char *block)
 			read_blocks(in->sb, indirect, id_block, 1);
 		}
 
-		/* allocate direct block */
+		/* allocate indirect block */
 		assert(((int *)indirect)[log_block_nr] == 0);	
 		phy_block_nr = testfs_alloc_block_for_inode(in);
 
@@ -162,6 +162,8 @@ testfs_allocate_block(struct inode *in, int log_block_nr, char *block)
 			if (indirect_allocated)
 				write_blocks(in->sb, dindirect, in->in.i_dindirect, 1);
 		} else if (indirect_allocated) {
+			/* Error in allocating direct block.
+			* Free any blocks that were allocated */
 			testfs_free_block_from_inode(in, id_block);
 			((int *)dindirect)[id_block_nr] = 0;
 
@@ -231,9 +233,8 @@ testfs_write_data(struct inode *in, const char *buf, off_t start, size_t size)
 
 	size = pos;
 
-	if (size > 0) {
+	if (size > 0)
 		in->in.i_size = MAX(in->in.i_size, start + (off_t) size);
-	}
 	in->i_flags |= I_FLAGS_DIRTY;
 
 	/* return the number of bytes written or any error */
@@ -280,23 +281,23 @@ testfs_free_blocks(struct inode *in)
 			char did_block[BLOCK_SIZE], block[BLOCK_SIZE];
 			assert(e_block_nr > 0);
 			read_blocks(in->sb, did_block, in->in.i_dindirect, 1);
-			for (i = 0; i < NR_INDIRECT_BLOCKS && e_block_nr > 0; i++) {
+			for (i = 0; i < NR_INDIRECT_BLOCKS && e_block_nr > 0; i++) {	// Loop through entries in dindirect block
 				if (((int *)did_block)[i] == 0) {
 					e_block_nr -= NR_INDIRECT_BLOCKS;
 					continue;
 				}
 				read_blocks(in->sb, block, ((int *)did_block)[i], 1);
-				for (int j = 0; j < e_block_nr && j < NR_INDIRECT_BLOCKS; j++) {
+				for (int j = 0; j < e_block_nr && j < NR_INDIRECT_BLOCKS; j++) {	// Loop through entries in indirect block
 					if (((int *)block)[j] == 0)
 						continue;
-					testfs_free_block_from_inode(in, ((int *)block)[j]);
+					testfs_free_block_from_inode(in, ((int *)block)[j]);	// Free direct block
 					((int *)block)[j] = 0;
 				}
-				testfs_free_block_from_inode(in, ((int *)did_block)[i]);
+				testfs_free_block_from_inode(in, ((int *)did_block)[i]);	// Free indirect block
 				((int *)did_block)[i] = 0;
 				e_block_nr -= NR_INDIRECT_BLOCKS;
 			}
-			testfs_free_block_from_inode(in, in->in.i_dindirect);
+			testfs_free_block_from_inode(in, in->in.i_dindirect);	// Free dindirect block
 			in->in.i_dindirect = 0;
 		}
 	}
